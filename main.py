@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy import text
+from app.db.session import engine
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
@@ -7,6 +8,14 @@ import psycopg2
 app = FastAPI()
 
 DATABASE_URL = "postgresql://postgres:root@localhost:5432/Retail_BI"
+engine = create_engine(DATABASE_URL)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 @app.get("/")
 def root():
     return {"message": "Retail BI Backend Running"}
@@ -27,6 +36,7 @@ conn = psycopg2.connect(
 )
 cur = conn.cursor()
 
+
 @app.get("/kpis")
 def get_kpis():
     cur = conn.cursor()
@@ -35,9 +45,10 @@ def get_kpis():
             COALESCE(SUM(total_amount), 0) AS total_sales,
             COALESCE(SUM(quantity), 0) AS units_sold,
             ROUND(
-                COALESCE(SUM(total_amount), 0) / NULLIF(COUNT(DISTINCT order_id), 0),
+                COALESCE(SUM(total_amount), 0) /
+                NULLIF(COALESCE(SUM(quantity), 0), 0),
                 2
-            ) AS aov
+            ) AS avg_order_value
         FROM sales;
     """)
     row = cur.fetchone()
@@ -45,21 +56,38 @@ def get_kpis():
     return {
         "total_sales": float(row[0]),
         "units_sold": int(row[1]),
-        "aov": float(row[2]) if row[2] else 0
+        "avg_order_value": float(row[2]) if row[2] else 0
     }
 
+
+
+
+@app.get("/top-products")
+def top_products():
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT 
+            p.product_name,
+            SUM(s.total_amount) AS total_sales
+        FROM sales s
+        JOIN products p ON s.product_id = p.product_id
+        GROUP BY p.product_name
+        ORDER BY total_sales DESC
+        LIMIT 5;
+    """)
+    rows = cur.fetchall()
+    return [{"product": r[0], "total_sales": float(r[1])} for r in rows]
 
 @app.get("/test-db")
 def test_db():
     try:
-        cur = conn.cursor()
-        cur.execute("SELECT 1;")
-        return {"db_status": "connected"}
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT 1"))
+            return {"db_status": "connected"}
     except Exception as e:
         return {"error": str(e)}
 
-
-@app.get("/health-sales")
+@app.get("/health/sales")
 def check_sales():
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM sales;")
