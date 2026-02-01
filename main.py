@@ -27,48 +27,27 @@ conn = psycopg2.connect(
 )
 cur = conn.cursor()
 
-
 @app.get("/kpis")
 def get_kpis():
+    cur = conn.cursor()
     cur.execute("""
         SELECT
             COALESCE(SUM(total_amount), 0) AS total_sales,
-            COALESCE(SUM(quantity), 0) AS total_units,
-            COALESCE(
-                ROUND(
-                    SUM(total_amount) / NULLIF(COUNT(DISTINCT order_id), 0),
-                    2
-                ),
-                0
-            ) AS avg_order_value
+            COALESCE(SUM(quantity), 0) AS units_sold,
+            ROUND(
+                COALESCE(SUM(total_amount), 0) / NULLIF(COUNT(DISTINCT order_id), 0),
+                2
+            ) AS aov
         FROM sales;
     """)
-
     row = cur.fetchone()
 
     return {
         "total_sales": float(row[0]),
-        "total_units": int(row[1]),
-        "avg_order_value": float(row[2])
+        "units_sold": int(row[1]),
+        "aov": float(row[2]) if row[2] else 0
     }
 
-
-
-@app.get("/top-products")
-def top_products():
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT 
-            p.product_name,
-            SUM(s.total_amount) AS total_sales
-        FROM sales s
-        JOIN products p ON s.product_id = p.product_id
-        GROUP BY p.product_name
-        ORDER BY total_sales DESC
-        LIMIT 5;
-    """)
-    rows = cur.fetchall()
-    return [{"product": r[0], "total_sales": float(r[1])} for r in rows]
 
 @app.get("/test-db")
 def test_db():
